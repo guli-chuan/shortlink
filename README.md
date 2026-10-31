@@ -6,7 +6,7 @@ Spring Boot + MySQL + Redis 实现的短链接服务：长链接转 6 位短码�
 
 本项目基于开源项目 [NiuXiangQian/u](https://github.com/NiuXiangQian/u) 二次开发。原项目使用 **GPL-3.0** 协议（[LICENSE](LICENSE) 已完整保留，源码中的原作者版权声明未删改）。
 
-原项目的形态是「**纯 Redis 存储 + MD5 截取短码**」：短链写在 Redis 里，Redis 重启没开持久化就全量丢失；短码由 `MD5(url)` 截取 9 位，存在哈希碰撞可能。我在其基础上做了 7 项改造，下文用 `【改造】` / `【新增】` 逐条标明，**没有把原有功能说成自己写的**。
+原项目的形态是「**纯 Redis 存储 + MD5 截取短码**」：短链写在 Redis 里，Redis 重启没开持久化就全量丢失；短码由 `MD5(url)` 截取 9 位，存在哈希碰撞可能。本项目在其基础上做了 7 项改造，下文用 `【改造】` / `【新增】` 逐条标明，便于区分原有功能与改动范围。
 
 ## 项目结构
 
@@ -130,7 +130,7 @@ accessCounter.increment(code);
 - 刷写失败必须把 delta **还回**本地（`sumThenReset` 已经清零，不还就真丢了）。
 - `/stats/detail` 要叠加未刷写部分，否则用户刚访问完查到的还是旧数字。
 
-代价是宕机最多丢 5 秒计数。统计数据不是钱，这个损失换跳转 QPS 提升是划算的——但这是取舍，得能说清楚。
+代价是宕机最多丢 5 秒计数。统计数据不是钱，用这个损失换跳转 QPS 提升是划算的，前提是明确接受最多丢 5 秒。
 
 ### 6. 删除接口与缓存一致性 【新增】
 
@@ -218,17 +218,21 @@ mysql -uroot -p < doc/sql/shortlink.sql
 | `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` | MySQL 连接 |
 | `SHORT_URL_SERVER` | 生成短链时拼在前面的域名，默认 `http://127.0.0.1:8080` |
 
-**3) 打包启动**
+**3) 运行**
+
+IDEA：打开项目根目录等待 Maven 导入完成，Project SDK 选 JDK 8，主类 `com.github.niu.u.UApplication`，环境变量按上表填好即可直接运行。
+
+命令行方式：
 
 ```bash
 mvn clean package -DskipTests
 
 # Git Bash / Linux
 REDIS_HOST=127.0.0.1 REDIS_PASSWORD=yourpass DB_PASSWORD=yourpass \
-  java -jar target/app-u.jar
+  java -jar target/shortlink.jar
 ```
 
-CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置，IDEA 用 Run Configuration 的 Environment variables 面板。启动后访问 `http://127.0.0.1:8080/` 是原有 web 界面。
+CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置。启动后访问 `http://127.0.0.1:8080/` 是原有 web 界面。
 
 ## 实测数据
 
@@ -248,7 +252,7 @@ CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置，IDEA 用 Run Configuration 的 E
 
 ## 已知限制
 
-这些是明确的取舍，不是没想到——面试被问到可以直接讲。
+这些是明确的取舍，不是遗漏——每一条都写清了原因和代价。
 
 1. **固定窗口有 2 倍突发**。实测：窗口剩最后 3 秒时用满 20 次配额，跨过边界立刻再打满 20 次，**不到 5 秒通过了 21 次**。彻底解决要用滑动窗口（ZSET 存时间戳）或令牌桶（按时间补令牌），代价是内存和复杂度。
 2. **统计最多丢 5 秒计数**（进程被 `kill -9` 时来不及 flush）。
