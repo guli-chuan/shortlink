@@ -1,0 +1,28 @@
+spring:
+  redis:
+    database: 1
+    # 连接信息全部走环境变量：仓库里不能出现明文密码，推上公开仓库等于把密码送人。
+    # 默认值只是本地开发兜底，密码留空，启动时用 REDIS_PASSWORD 注入。
+    host: ${REDIS_HOST:192.168.47.128}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/shortlink?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 打印 SQL，方便确认到底走没走库（上线前改成 NoLoggingImpl）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      table-underline: true
+short_url:
+  server: ${SHORT_URL_SERVER:http://127.0.0.1:8080}

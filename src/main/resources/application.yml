@@ -1,0 +1,22 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+  profiles:
+    active: dev
+logging:
+  file:
+    path: ./logs
+
+short_url:
+  # 默认有效期（秒），3 天；调用方显式传 -1 时为永久有效
+  default-valid-time: 259200
+  rate-limit:
+    # 总开关。留成配置而不是只靠注解，是为了出故障时能立刻停掉限流而不必发版
+    enabled: true
+    # 是否信任 X-Forwarded-For / X-Real-IP。
+    # 默认 false：这两个头客户端可以随便填，盲信它们等于让按 IP 限流被一行请求头绕过。
+    # 只有当服务确实部署在可信反向代理（如本机 nginx）后面时才改成 true。
+    trust-proxy: false

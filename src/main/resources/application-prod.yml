@@ -1,0 +1,10 @@
+spring:
+  redis:
+    database: 1
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+short_url:
+  # 生成短链时拼在前面的域名。原项目这里写的是作者的演示站，
+  # 改成环境变量，避免部署后生成出指向别人域名的短链。
+  server: ${SHORT_URL_SERVER:http://127.0.0.1:8080}
