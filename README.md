@@ -270,6 +270,7 @@ CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置。启动后访问 `http://127.0.0.
 - **`@Scheduled` 默认启动后就执行第一次**。自愈检查和 `ApplicationReadyEvent` 的预热撞车，日志里出现两条"预热完成"，加 `initialDelay` 修掉。
 - **`code` 必须允许 NULL**。用空字符串占位，第二个并发插入就撞唯一索引。
 - **命中日志不能打 INFO**。2 万次请求刷了 2 万行日志，日志 I/O 直接把 QPS 测量值拉低。高频路径按调用量决定日志级别，热度看 `/stats/cache` 就够了。
+- **一条 demo 数据的初始化能把启动拖死**。`BootInit` 在 `afterPropertiesSet` 里往 Redis 写默认 AK/SK，Redis 连不上就直接抛异常、应用起不来——一条非关键数据决定了整站可用性。改为捕获后记 warn（`BootInit` 已改），和布隆预热、限流保持同一套 fail-open 口径。
 
 ## License
 
