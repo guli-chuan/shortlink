@@ -1,9 +1,43 @@
+server:
+  port: 8080
+  # 容器里 docker stop 发的是 SIGTERM。不开 graceful 的话，Spring 收到信号立刻
+  # 关闭上下文、断开连接，正在处理的请求被硬切断；开了之后先停止接收新请求、
+  # 等手头的请求跑完再退出。容器编排滚动升级时这个差别很直观
+  shutdown: graceful
+
 spring:
+  lifecycle:
+    # 排在 SIGTERM 之后的等待上限。必须小于 docker stop 的超时
+    # （compose 里 stop_grace_period），否则还没排空就被 SIGKILL
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/shortlink?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
   redis:
     database: 1
     host: ${REDIS_HOST:127.0.0.1}
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 生产不打印 SQL。跳转是高频路径，StdOut 会把容器日志刷爆，
+    # 且 SQL 参数里带业务数据，不适合留在日志里
+  global-config:
+    db-config:
+      # 必须是 auto（数据库自增主键）。
+      # 不写默认是 ASSIGN_ID（雪花算法），主键变 19 位长整型，
+      # Base62 编出来的短码随之变长且不连续，短码方案会失真
+      id-type: auto
+      table-underline: true
+
 short_url:
   # 生成短链时拼在前面的域名。原项目这里写的是作者的演示站，
   # 改成环境变量，避免部署后生成出指向别人域名的短链。

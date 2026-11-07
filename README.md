@@ -234,6 +234,44 @@ REDIS_HOST=127.0.0.1 REDIS_PASSWORD=yourpass DB_PASSWORD=yourpass \
 
 CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置。启动后访问 `http://127.0.0.1:8080/` 是原有 web 界面。
 
+## 容器化部署
+
+三个容器：`app` / `mysql` / `redis`，在同一个自定义网络里用**服务名**互访。
+
+```bash
+cp .env.example .env        # 先改掉里面的两个密码
+docker compose up -d --build
+```
+
+| 文件 | 作用 |
+|---|---|
+| `Dockerfile` | 基于 `eclipse-temurin:8-jre-jammy`，只装 JRE，编译产物在宿主机打完再拷进去 |
+| `docker-compose.yml` | 三个服务 + 两个命名卷 + 健康检查 + 启动依赖 |
+| `.env.example` | 密码模板；实际用的 `.env` 已在 `.gitignore` 里 |
+| `doc/sql/shortlink.sql` | 挂到 `/docker-entrypoint-initdb.d/`，**首次启动且数据目录为空**时自动执行 |
+
+启动顺序由 `depends_on.condition: service_healthy` 保证：MySQL 要先初始化数据目录、执行建表脚本，探活通过后 app 才开始连接。缺了这一条，app 会在 MySQL 还没 ready 时连库失败并退出。
+
+**几个有意为之的细节**
+
+- **`ENTRYPOINT` 里的 `exec`**：不加 `exec` 时容器的 PID 1 是 `sh`，`docker stop` 发的 SIGTERM 到不了 JVM，Spring 的 `@PreDestroy` 不执行，只能等超时被 SIGKILL。加了之后配合 `server.shutdown: graceful` 和 `stop_grace_period: 25s`，在途请求能跑完再退出。
+- **容器里的 `localhost` 指容器自己**，所以 `DB_HOST=mysql`、`REDIS_HOST=redis`，写 `127.0.0.1` 一定连不上。
+- **数据落在命名卷**：`mysql-data`、`redis-data`。Redis 开 AOF，重启后布隆位数组和计数器不丢。
+- **日志以 stdout 为准**：容器里不便于翻文件，`docker logs` 是唯一入口，因此 prod profile 把应用包与 Spring 启停日志的级别放到 INFO。
+
+**部署验证**
+
+| 项 | 结果 |
+|---|---|
+| 镜像构建 | 约 20 秒（分层缓存命中时更快） |
+| 冷启动到 `Started UApplication` | **3.1 秒** |
+| 建表 | 首次启动自动完成，`short_url` / `visit_stat` 就绪 |
+| 生成 → 302 → 二次跳转命中缓存 | 通过 |
+| 编造短码 | 404，`bloomRejected` +1，未查库 |
+| 20 次 / 60 秒限流 | 第 21 次 429，`Retry-After` 正确 |
+| `docker stop` | **737 ms**，退出码 143（JVM 收到 SIGTERM 的正常退出码），日志含完整 `Commencing graceful shutdown` → `Graceful shutdown complete` |
+| 重启后数据 | MySQL 记录仍在，布隆预热灌入 19 个有效短码（已删除的不计入） |
+
 ## 实测数据
 
 环境：JDK 8、本机 MySQL 8、单机 Redis 7，压测客户端为 Python `http.client` 20 线程。
@@ -271,6 +309,8 @@ CMD 用 `set REDIS_PASSWORD=xxx` 逐条设置。启动后访问 `http://127.0.0.
 - **`code` 必须允许 NULL**。用空字符串占位，第二个并发插入就撞唯一索引。
 - **命中日志不能打 INFO**。2 万次请求刷了 2 万行日志，日志 I/O 直接把 QPS 测量值拉低。高频路径按调用量决定日志级别，热度看 `/stats/cache` 就够了。
 - **一条 demo 数据的初始化能把启动拖死**。`BootInit` 在 `afterPropertiesSet` 里往 Redis 写默认 AK/SK，Redis 连不上就直接抛异常、应用起不来——一条非关键数据决定了整站可用性。改为捕获后记 warn（`BootInit` 已改），和布隆预热、限流保持同一套 fail-open 口径。
+- **compose 里的 `${VAR}` 不会自动变成容器内的环境变量**。Redis 的 `--requirepass ${REDIS_PASSWORD}` 是 **compose 在宿主机替换**后写进启动参数的，容器里根本没有 `REDIS_PASSWORD` 这个变量；而 `healthcheck` 是在**容器内**执行的，读到空值就变成 `redis-cli -a "" ping`，一直 `WRONGPASS`，整个 compose 卡在 `dependency failed to start`。必须显式加 `environment: REDIS_PASSWORD: ${REDIS_PASSWORD}`。MySQL 那边没出问题，是因为官方镜像自己会读 `MYSQL_ROOT_PASSWORD`。
+- **空库启动会让布隆过滤器自愈检查每 60 秒误报一次**。`warmUp()` 查到 0 行短码时直接 return，没建 key；`ensureLoaded()` 随后判 `hasKey=false`，认为"位数组丢失"，于是每 60 秒打一条 WARN 并重跑全量预热。真丢位数组时反而被这些噪音盖住。修法是在空库分支里 `SETBIT key 0 0` 把 key 建出来（写 0 同样会创建这个 key）。
 
 ## License
 

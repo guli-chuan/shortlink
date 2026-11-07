@@ -65,11 +65,21 @@
 
     <!-- 生产环境. 日志级别为WARN且写日志文件-->
     <springProfile name="prod">
-        <logger name="com.github.niu.u" additivity="false">
+        <!--
+            root=WARN 会让应用自己的 INFO 日志也一起消失，其中包含
+            "开始启动 / 启动完成 / 优雅停机"这些判断容器是否健康的关键行。
+            放进容器后 docker logs 是排查的唯一入口，正文用 WARN 可以，
+            但这几条绝不能看不到，所以单独把应用包和 Spring Boot 启动日志放到 INFO。
+        -->
+        <logger name="com.github.niu.u" level="INFO" additivity="false">
             <appender-ref ref="STDOUT"/>
             <appender-ref ref="FILE_ERROR" />
             <appender-ref ref="FILE_INFO" />
         </logger>
+        <logger name="org.springframework.boot" level="INFO"/>
+        <!-- 上下文关闭（含 graceful shutdown 的排空过程）走的是这个包，
+             不放开的话停机在日志里完全不可见，只能看到一个退出码 -->
+        <logger name="org.springframework.context" level="INFO"/>
 
         <root level="WARN">
             <appender-ref ref="STDOUT"/>

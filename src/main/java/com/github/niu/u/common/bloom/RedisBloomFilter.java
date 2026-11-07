@@ -164,6 +164,13 @@ public class RedisBloomFilter {
                     .eq(ShortUrl::getDelFlag, 0));
             if (rows == null || rows.isEmpty()) {
                 initialized = true;
+                // 空库也必须把 key 建出来：SETBIT 写 0 同样会创建这个 key（值是一个全 0 的串）。
+                // 不建的话 ensureLoaded() 每次都判 hasKey=false，每 60 秒误报一次
+                // "位数组丢失"再触发一次全量预热，日志会一直刷，也让真正丢失时无感
+                redisTemplate.execute((RedisCallback<Object>) (RedisConnection connection) -> {
+                    connection.setBit(RAW_KEY, 0, false);
+                    return null;
+                });
                 logger.info("布隆过滤器预热完成: 库里没有短码，位数组 {} bit", bitSize);
                 return;
             }

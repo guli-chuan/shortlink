@@ -1,0 +1,100 @@
+# 短链接平台：一条命令起 app + mysql + redis
+#
+# 用法：
+#   cp .env.example .env    # 改里面的密码
+#   docker compose up -d --build
+#
+# 三个容器在同一个自定义网络里，互相用「服务名」当主机名访问。
+# 这是容器部署最容易踩的坑：容器里的 127.0.0.1 指的是容器自己，
+# 不是宿主机，所以连库必须写 mysql:3306 而不是 localhost:3306。
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: shortlink-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: shortlink
+      TZ: Asia/Shanghai
+    # 首次启动（数据卷为空）时自动执行建表脚本；卷里已有数据则跳过
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./doc/sql/shortlink.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      # app 依赖数据库就绪，但 MySQL 容器「启动」不等于「能接受连接」，
+      # 初始化过程要几十秒。用 ping 探活，healthy 之后才放 app 起来
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks: [shortlink-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: shortlink-redis
+    restart: unless-stopped
+    # 必须显式注入 REDIS_PASSWORD：下面 command 里的 ${REDIS_PASSWORD} 是
+    # compose 在宿主机替换的，不会留在容器环境里；而 healthcheck 是在容器内
+    # 执行的，读不到这个变量就会变成 redis-cli -a "" ping，认证失败
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # appendonly yes：短链的布隆过滤器和统计都在 Redis 里，
+    # 不开持久化的话容器重启位数组就没了，只能等 60s 自愈重建
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [shortlink-net]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shortlink:latest
+    container_name: shortlink-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 生成短链时拼在前面的地址。部署到真机后改成实际域名或公网 IP
+      SHORT_URL_SERVER: ${SHORT_URL_SERVER:-http://localhost:8080}
+    ports:
+      - "8080:8080"
+    # docker stop 默认只等 10s 就 SIGKILL。应用开了 graceful shutdown，
+    # 排空上限配的是 20s，这里必须比它大，否则等于白配
+    stop_grace_period: 25s
+    networks: [shortlink-net]
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  shortlink-net:
+    driver: bridge

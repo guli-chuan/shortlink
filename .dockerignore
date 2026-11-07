@@ -1,0 +1,19 @@
+# 构建镜像时不需要送进 docker daemon 的东西
+# 注意：不能排除 target/ 整体，Dockerfile 要 COPY target/shortlink.jar
+.git
+.gitignore
+.idea
+*.iml
+.vscode
+.run
+logs
+doc
+README.md
+build.sh
+docker-compose.yml
+target/classes
+target/test-classes
+target/maven-archiver
+target/maven-status
+target/generated-sources
+target/surefire-reports
